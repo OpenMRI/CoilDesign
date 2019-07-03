@@ -1,0 +1,192 @@
+function [node,faces,tri] = twRadialCylinderTeeMeshSection(cylinder_radius, section_arc_start, section_arc_end, section_length, center, mesh_size)
+% Generate a radial section of a cylinder mesh of a Tee-shape
+% 
+% in order to achieve a Tee shaped section section_arc_start,
+% section_arc_end and section_length are arrays
+
+% TODO: if the arrays are of different_length fail
+
+nsegments = size(section_arc_start,2);
+
+% Order for normal pointing outward
+vertex_order = 'CW';
+
+% Note, the mesh size should be done differently azimutal and length
+% wise, but for now we use the same in this function
+azimuth_mesh_size = mesh_size;
+length_mesh_size = mesh_size;
+
+total_length = sum(section_length);
+
+% get all the sections setup in the z-direction
+zmin(1) = -total_length/2;
+for segment =2:nsegments
+   zmin(segment) = zmin(segment-1)+section_length(segment-1); 
+end
+
+for segment = 1:nsegments
+    % if section_arc_end <= section_arc_start, there must be an error
+
+    % if arc_radians >= 2pi there must be an error!!!
+    arc_radians(segment) = abs(section_arc_end(segment)-section_arc_start(segment));
+
+    % arclgenth azimuth
+
+    arc_length(segment) = arc_radians(segment)*cylinder_radius;
+    narcs(segment) = ceil(arc_length(segment)/azimuth_mesh_size)+1;
+    arc_step_size(segment) = arc_radians(segment)/(narcs(segment)-1); % this is in real space
+
+    % stepsize longitudinal
+    nzsteps(segment) = ceil(section_length(segment)/length_mesh_size)+1;
+    zstep_size(segment) = section_length(segment)/(nzsteps(segment)-1);
+end
+
+%disp(sprintf("There will be %d vertices in the mesh (nzsteps=%d)!",nzsteps*narcs,nzsteps));
+
+% create all the vertices
+vertex = 1;
+start_vertex = [];
+for segment = 1:nsegments
+    start_vertex(segment) = vertex;
+    for zstep = 1:nzsteps(segment)
+        for aarc = 1:narcs(segment)
+            phi = section_arc_start(segment)+(aarc-1)*arc_step_size(segment);
+            z = (zstep-1)*zstep_size(segment)+zmin(segment) + center(3);
+            x = cos(phi)*cylinder_radius + center(1);
+            y = sin(phi)*cylinder_radius + center(2);
+            node(vertex,1) = x;
+            node(vertex,2) = y;
+            node(vertex,3) = z;
+            % enhanced node information
+            ehnode(vertex,1) = phi;
+            ehnode(vertex,2) = z;
+            ehnode(vertex,3) = phi/(2*pi); % u
+            ehnode(vertex,4) = (z-zmin(1))/total_length; %v
+            vertex = vertex+1;
+        end
+    end
+end
+
+% number of faces is on this cylinder
+% per azimut
+%ntriag_azimut = narcs*2;
+% there is one ring less than steps, so total is
+%ntriag = (nzsteps-1)*ntriag_azimut;
+
+%disp(sprintf("There will be %d triangles in the mesh !",ntriag));
+
+
+% now create all the faces (triangles)
+% since this is a regular mesh, this should work with straight forward
+% rules
+% First triangle should be (1 narc+1 2)
+% Second triangle should be (2 narc+1 narc+2)
+
+start_triangle = 0;
+
+for segment=1:nsegments
+    % Now do the first kind of triangle
+    triangle = start_triangle+1;
+    for rung=1:(nzsteps(segment)-1)
+        for aarc = 2:narcs(segment)
+            v = (rung-1)*narcs(segment)+aarc+(start_vertex(segment)-1);
+            
+            % fuse the two meshes
+            if rung==1 && (segment>1)
+                % define start of search range (last rung of previous
+                % segment)
+                substitute_start = (nzsteps(segment-1)-1)*narcs(segment-1)+(start_vertex(segment-1)-1);
+                
+                % since this is an ordered mesh, we only need to find the
+                % first closest vertex
+                if aarc == 2
+                    vsubstitute = twFindClosestNodeFromRange(node,v,substitute_start:(substitute_start+narcs(segment-1)));
+                    
+                    % actually check whether this is "before" v (this
+                    % doesn't account for 2pi wrap yet.
+                    if ehnode(vsubstitute,1) > ehnode(v,1)
+                        disp(sprintf('Sub.pi = %g, v.phi = %g',ehnode(vsubstitute,1),ehnode(v,1)))
+                        vsubstitute = vsubstitute-1;
+                    end
+                end
+                % we should map out which vertices we are subsituting
+                
+                faces(triangle,1) = vsubstitute+(aarc-2);
+            else
+                faces(triangle,1) = v;
+            end
+            
+            if strcmp(vertex_order,'CCW')
+                faces(triangle,2) = v+narcs(segment)-1;
+                faces(triangle,3) = v+narcs(segment);
+            elseif strcmp(vertex_order,'CW')
+                faces(triangle,2) = v+narcs(segment);
+                faces(triangle,3) = v+narcs(segment)-1;
+            end
+            triangle = triangle+2;
+        end
+    end 
+    
+    % Then do the second kind of triangle 
+    triangle = 2+start_triangle;
+    for rung=1:(nzsteps(segment)-1)
+        for aarc = 1:(narcs(segment)-1)
+            v = (rung-1)*narcs(segment)+aarc+(start_vertex(segment)-1);
+            % fuse the two meshes
+            if rung==1 && (segment>1)
+                
+                if aarc == 1
+                    substitute_start = (nzsteps(segment-1)-1)*narcs(segment-1)+(start_vertex(segment-1)-1);
+                    % define start of search range (last rung of previous
+                    % segment)
+                    vsubstitute = twFindClosestNodeFromRange(node,v,substitute_start:(substitute_start+narcs(segment-1)));
+                
+                    % actually check whether this is "before" v (this
+                    % doesn't account for 2pi wrap yet.
+                    if ehnode(vsubstitute,1) > ehnode(v,1)
+                        disp(sprintf('Sub.pi = %g, v.phi = %g',ehnode(vsubstitute,1),ehnode(v,1)))
+                        vsubstitute = vsubstitute-1;
+                    end
+                end
+                % we should map out which vertices we are subsituting
+                
+                faces(triangle,1) = vsubstitute + aarc-1;
+                if strcmp(vertex_order,'CCW')
+                    faces(triangle,2) = v+narcs(segment);
+                    faces(triangle,3) = vsubstitute+1 + aarc-1;
+                elseif strcmp(vertex_order,'CW')
+                    faces(triangle,2) = vsubstitute+1 + aarc-1;
+                    faces(triangle,3) = v+narcs(segment);
+                end
+            else
+            
+                faces(triangle,1) = v;
+                if strcmp(vertex_order,'CCW')
+                    faces(triangle,2) = v+narcs(segment);
+                    faces(triangle,3) = v+1;
+                elseif strcmp(vertex_order,'CW')
+                    faces(triangle,2) = v+1;
+                    faces(triangle,3) = v+narcs(segment);
+                end
+            end
+            triangle = triangle+2;
+        end
+    end
+    
+    start_triangle = triangle-2;
+    
+end
+
+tri = TriRep(faces,node(:,1),node(:,2),node(:,3));
+
+% optional display of the cylinder mesh
+tr = triangulation(faces,node(:,1),node(:,2),node(:,3));
+figure(99);
+%trisurf(tr)
+trisurf(faces,node(:,1),node(:,2),node(:,3),ehnode(:,1)); colorbar
+axis equal;
+fn = faceNormal(tr);  
+P = incenter(tr);
+hold on;
+quiver3(P(:,1),P(:,2),P(:,3),fn(:,1),fn(:,2),fn(:,3),1.5, 'color','r');
+hold off;

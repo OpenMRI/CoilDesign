@@ -1,0 +1,7 @@
+05/02/2019
+
+Basic functions to create slotted shields and high-pass birdcage meshes have been created
+DXF export seems to work rudimentary
+The meshing isn't great but works, needs some more careful documentation
+I believe the meaning of CW/CCW is completely reversed everywhere
+
